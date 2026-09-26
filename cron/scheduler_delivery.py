@@ -1559,6 +1559,35 @@ def _live_send_media(
         delivery_errors.append(f"{_me} (target {t.where})")
 
 
+def _persist_opened_thread_to_origin(job: dict, origin: dict, opened_thread_id: str,
+                                      platform_name: str, chat_id: str) -> None:
+    """Persist a freshly opened delivery thread to ``origin.thread_id`` so the next run reuses it
+    instead of opening a duplicate thread every fire. Gate 1: only when this target IS the
+    origin conversation (same platform + chat) — a different target must not rewrite where
+    ``deliver=origin`` points. Gate 2: skip the Slack home-chat thread-per-message artifact case
+    (``_origin_thread_is_stale`` would drop the persisted stamp next run and reopen anyway).
+    Never raises: bookkeeping must not fail a completed delivery."""
+    if not origin or not opened_thread_id:
+        return
+    if str(origin.get("platform") or "").lower() != str(platform_name or "").lower():
+        return
+    if str(origin.get("chat_id", "")) != str(chat_id):
+        return
+    if str(origin.get("platform") or "").lower() == "slack":
+        home_chat = _get_home_target_chat_id("slack")
+        if home_chat and str(origin.get("chat_id")) == str(home_chat):
+            return
+    if str(origin.get("thread_id") or "") == str(opened_thread_id):
+        return
+    try:
+        from cron.jobs import update_job
+        update_job(job["id"], {"origin": {**origin, "thread_id": str(opened_thread_id)}})
+        logger.info("Job '%s': persisted opened thread_id=%s to origin (re-runs will reuse it)",
+                    job["id"], opened_thread_id)
+    except Exception as exc:  # pragma: no cover - bookkeeping must not fail delivery
+        logger.debug("Job '%s': failed to persist opened thread_id to origin: %s", job["id"], exc)
+
+
 def _seed_live_delivery_sessions(t: _TargetDelivery, delivered_message_id) -> None:
     """After a confirmed live send, seed continuation session(s) and run the generic mirror.
     Thread seeding is deferred here so open-succeeds/deliver-fails never seeds an unseen brief."""
@@ -1574,6 +1603,8 @@ def _seed_live_delivery_sessions(t: _TargetDelivery, delivered_message_id) -> No
             **seed_kwargs,
         )
         thread_seeded = True
+        _persist_opened_thread_to_origin(
+            job, origin, t.opened_thread_id, t.platform_name, t.chat_id)
     # in_channel: CREATE + seed the flat session (the mirror only APPENDS to an existing one). Same
     # `inchannel_continuable` gate as the flatten in _deliver_result (must not drift). Origin
     # seed without mirror opt-in; others only via _inchannel_seed_allowed (user-less seed = orphan).
