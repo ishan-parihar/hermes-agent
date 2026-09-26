@@ -134,6 +134,35 @@ def jittered_backoff(attempt: int, *, base_delay: float = 5.0, max_delay: float 
     return delay + random.Random(seed).uniform(0, jitter_ratio * delay)
 
 
+def linear_backoff(attempt: int, *, delay: float = 3.0, max_delay: float = 30.0) -> float:
+    """min(delay * attempt, max_delay). ``attempt`` is 1-based. Deterministic (no jitter) —
+    used when the user pins ``agent.retry_backoff: linear`` so the fallback chain paces
+    predictably instead of stalling on slow providers via exponential growth."""
+    return min(max(0.0, delay) * max(1, attempt), max(0.0, max_delay))
+
+
+def _user_retry_backoff_policy(agent) -> tuple[bool, float, float]:
+    """``(use_linear, delay, max_delay)`` from the agent's config-stamped retry policy.
+    Defaults (None) keep the shipped exponential behavior byte-identical."""
+    if not bool(getattr(agent, "_retry_backoff_linear", False)):
+        return False, 0.0, 0.0
+    return (
+        True,
+        float(getattr(agent, "_retry_backoff_seconds", 3.0) or 3.0),
+        float(getattr(agent, "_retry_backoff_max_seconds", 30.0) or 30.0),
+    )
+
+
+def retry_backoff_seconds(agent, attempt: int, *, base_delay: float, max_delay: float) -> float:
+    """Backoff seconds for a mid-turn provider retry: the user's pinned linear policy when
+    ``agent.retry_backoff: linear`` is configured, else the site's exponential default. Callers
+    keep their own ``base_delay``/``max_delay`` tuning; only the pinned policy overrides it."""
+    use_linear, delay, linear_max = _user_retry_backoff_policy(agent)
+    if use_linear:
+        return linear_backoff(attempt, delay=delay, max_delay=linear_max)
+    return jittered_backoff(attempt, base_delay=base_delay, max_delay=max_delay)
+
+
 def _error_text(error: Any) -> str:
     """Best-effort flattened provider error text for retry classification."""
     parts = [error, getattr(error, "message", None), getattr(error, "body", None), getattr(error, "response", None)]
