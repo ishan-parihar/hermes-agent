@@ -242,7 +242,7 @@ def retry_invalid_response(
     fallback (empty responses often mean rate limiting), terminal result at max retries,
     else jittered backoff that preserves a pending redirect."""
     from agent.conversation_loop import _arm_fallback_restart
-    from agent.retry_utils import jittered_backoff
+    from agent.retry_utils import jittered_backoff, retry_backoff_seconds
     from agent.turn_recovery import (
         classify_codex_soft_failure, describe_invalid_response, interruptible_backoff_sleep,
     )
@@ -330,7 +330,7 @@ def retry_invalid_response(
             "failed": True,
         }, invalid_response_failure_reason(response), True))
 
-    wait_time = jittered_backoff(retry_count, base_delay=5.0, max_delay=120.0)
+    wait_time = retry_backoff_seconds(agent, retry_count, base_delay=5.0, max_delay=120.0)
     agent._buffer_vprint(f"⏳ Retrying in {wait_time:.1f}s ({_failure_hint})...")
     logger.warning("Invalid API response (retry %d/%d): %s | Provider: %s", retry_count, max_retries, ', '.join(error_details), provider_name)
 

@@ -1394,6 +1394,24 @@ def _apply_agent_section(agent, _agent_cfg):
     # "auto" (codex_responses only), true (all api_modes), false, or model substrings.
     agent._intent_ack_continuation = _agent_section.get("intent_ack_continuation", "auto")
 
+    # Retry pacing policy (agent.retry_backoff): "exponential" (default, shipped
+    # jittered_backoff) or "linear" (deterministic min(delay*attempt, cap) via
+    # agent.retry_backoff_seconds / agent.retry_backoff_max_seconds — predictable
+    # pacing for slow-provider fallback chains). Unset/invalid keeps exponential.
+    _backoff_mode = str(_agent_section.get("retry_backoff") or "").strip().lower()
+    agent._retry_backoff_linear = _backoff_mode == "linear"
+    if agent._retry_backoff_linear:
+        with suppress(Exception):
+            agent._retry_backoff_seconds = max(
+                0.0, float(_agent_section.get("retry_backoff_seconds", 3.0)))
+        with suppress(Exception):
+            agent._retry_backoff_max_seconds = max(
+                agent._retry_backoff_seconds, float(_agent_section.get("retry_backoff_max_seconds", 30.0)))
+        logger.info(
+            "Retry backoff policy: linear (delay=%ss, cap=%ss)",
+            getattr(agent, "_retry_backoff_seconds", 3.0),
+            getattr(agent, "_retry_backoff_max_seconds", 30.0))
+
     # Responses `text.verbosity`: "" / unknown value = not sent (never flips the provider default).
     _verbosity = str(_agent_section.get("text_verbosity") or "").strip().lower()
     if _verbosity and _verbosity not in {"low", "medium", "high"}:
