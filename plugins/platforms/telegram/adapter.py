@@ -3675,6 +3675,15 @@ class TelegramAdapter(BasePlatformAdapter):
                 return await live.send(chat_id, content, reply_to, metadata)
             if not self._bot:
                 return SendResult(success=False, error="Not connected", retryable=True)
+        else:
+            # A torn-down adapter keeps a stale truthy `_bot` (`_mark_disconnected` only clears
+            # `_running`), so the recovery block above is skipped and every send strands on
+            # `send_path_degraded` even while a healthy replacement is live in
+            # `runner.adapters`. Delegating here can only turn a guaranteed failure into a
+            # possible success — never the reverse (#129047-class outage, 2026-09-27).
+            live = self._replacement_telegram_adapter()
+            if live is not None:
+                return await live.send(chat_id, content, reply_to, metadata)
         # getattr() — tests build adapters via object.__new__() (no __init__).
         if getattr(self, "_send_path_degraded", False):
             return SendResult(success=False, error="send_path_degraded", retryable=True)
