@@ -1426,6 +1426,7 @@ class _BoundedCronSessionDB:
         self._session_db = session_db
         self._job_id = job_id
         self._disabled = False
+        self._prior_failure = None
 
     def __getattr__(self, name):
         target = getattr(self._session_db, name)
@@ -1434,7 +1435,11 @@ class _BoundedCronSessionDB:
 
         def _bounded(*args, **kwargs):
             if self._disabled:
-                raise RuntimeError("session finalization disabled after prior cleanup failure")
+                # Fail fast, but keep the original cause visible — the latch message was
+                # replacing the job's real error in delivered alerts (diagnosed 2026-09-27).
+                raise RuntimeError(
+                    f"session finalization disabled after prior cleanup failure: {self._prior_failure}"
+                )
 
             result = {}
 
@@ -1450,9 +1455,11 @@ class _BoundedCronSessionDB:
             if not ok:
                 error = result.get("error")
                 if error is not None:
+                    self._prior_failure = f"{type(error).__name__}: {error}"
                     raise error
                 # No error yet not complete == timeout: disable so later steps fail fast.
                 self._disabled = True
+                self._prior_failure = f"{name} exceeded the cleanup timeout"
                 raise TimeoutError(f"session finalization method {name} timed out")
             return result.get("value")
 
