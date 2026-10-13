@@ -36,6 +36,10 @@ _XAI_TOOL_SEARCH_ALIAS = "hermes_tool_search"
 _STRIP_MSG_KEYS = (
     "codex_reasoning_items", "codex_message_items", "tool_name", "effect_disposition", "timestamp",
     "platform_message_id", "api_content", "anthropic_content_blocks", "bedrock_content_blocks", MESSAGE_UID,
+    # Trajectory-only key (turn_context copies it to reasoning_content then pops it). Wire defense:
+    # serde backends alias reasoning -> reasoning_content (NVIDIA integrate) and 400 with
+    # "duplicate field reasoning_content" when both survive; strict backends reject unknown keys.
+    "reasoning", "finish_reason",
 )
 _STRIP_TC_KEYS = ("call_id", "response_item_id")
 _HIGH_EFFORTS = {"high", "xhigh", "max", "ultra"}
